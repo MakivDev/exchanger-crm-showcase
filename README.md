@@ -1,9 +1,8 @@
-```markdown
 # CRM for Exchanger
 
 Operational CRM for currency exchange offices: cash desks, daily trade journal, counterparties, debts, expenses, and day-close P/L in USD.
 
-This repository is a **product showcase**. UI, configuration, and the Prisma schema are public. Server-side mutations, aggregation queries, and monetary calculation modules are not included.
+This repository is a **product showcase**. UI, configuration, and the Prisma schema are public. Server-side mutations, aggregation queries, and monetary calculation modules are not included here.
 
 ---
 
@@ -79,7 +78,7 @@ Exact derivation of missing rates, rounding policy, and close-day formulas live 
 
 ## Access control
 
-Authentication: login + password. The session token is stored in an **httpOnly** cookie; only a hash is persisted. `Secure` depends on environment (`COOKIE_SECURE` / HTTPS `APP_URL`) so HTTP-on-IP VPS logins still work until TLS is enabled.
+Authentication: login + password. The session token is stored in an **httpOnly** cookie; only a hash is persisted. `Secure` depends on environment (`COOKIE_SECURE` / HTTPS) so HTTP-on-IP VPS logins still work until TLS is enabled.
 
 Nine permission codes (examples): view operations, view wallets, create/edit operations, archive, delete, edit opening balances, manage directories, manage users, view audit.
 
@@ -104,7 +103,6 @@ Next.js (this app)
   └─ Private: Server Actions, data loaders, money engine
         │
 PostgreSQL
-
 ```
 
 UI lists use client-side search, sort, and pagination suitable for a cashier’s daily volume—not warehouse-scale analytics.
@@ -119,15 +117,14 @@ components/          UI by domain
 prisma/schema.prisma Canonical data model
 docker-compose.yml   db + migrate + app
 Dockerfile           Multi-stage standalone image
-
 ```
 
 Intentionally unpublished (commercial logic):
 
-* `lib/actions/` — Server Actions
-* `lib/money/` — FX / P/L / day-close calculations
-* `lib/data/` — server aggregations
-* Prisma seed with demo volumes
+- `lib/actions/` — Server Actions
+- `lib/money/` — FX / P/L / day-close calculations
+- `lib/data/` — server aggregations
+- Prisma seed with demo volumes
 
 The schema is still the source of truth for entities, indexes, and decimal columns.
 
@@ -144,7 +141,6 @@ npm run db:up
 npx prisma migrate deploy
 npx prisma db seed   # optional demo data; change seed admin password
 npm run dev
-
 ```
 
 Open the printed localhost / LAN URL, then `/login`. An empty database presents the setup wizard instead of the login form.
@@ -178,11 +174,11 @@ Health: `GET /api/health/db` — connectivity plus coarse table counts (no busin
 
 ## Security notes
 
-* Passwords hashed with bcrypt.
-* Session token never stored in plaintext.
-* Branch and wallet deletes are restricted where history exists; destructive actions use preview + confirmation where the UI exposes them.
-* Audit records actor, action, entity, optional before/after metadata.
-* This is an **internal ops tool**: no OAuth, 2FA, or SSO in the current product.
+- Passwords hashed with bcrypt.
+- Session token never stored in plaintext.
+- Branch and wallet deletes are restricted where history exists; destructive actions use preview + confirmation where the UI exposes them.
+- Audit records actor, action, entity, optional before/after metadata.
+- This is an **internal ops tool**: no OAuth, 2FA, or SSO in the current product.
 
 Do not commit `.env`. Rotate `SEED_ADMIN_*` immediately after first login on any shared machine.
 
@@ -190,10 +186,10 @@ Do not commit `.env`. Rotate `SEED_ADMIN_*` immediately after first login on any
 
 ## What this showcase is not
 
-* Not a public banking API
-* Not double-entry general ledger software
-* Not multi-organization SaaS isolation
-* Not a substitute for licensed accounting in your jurisdiction
+- Not a public banking API
+- Not double-entry general ledger software
+- Not multi-organization SaaS isolation
+- Not a substitute for licensed accounting in your jurisdiction
 
 ---
 
