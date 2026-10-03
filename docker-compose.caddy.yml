@@ -1,0 +1,28 @@
+# HTTPS через Caddy (Let's Encrypt).
+# Запуск разом з основним compose:
+#   docker compose -f docker-compose.yml -f docker-compose.caddy.yml up -d
+# Або: ./scripts/vps-enable-https.sh your-domain.com
+#
+# Потрібно в .env: DOMAIN=your-domain.com
+# DNS A-записи @ і www → IP сервера мають вже вказувати сюди.
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - '80:80'
+      - '443:443'
+      - '443:443/udp'
+    environment:
+      DOMAIN: ${DOMAIN:?Вкажіть DOMAIN у .env (наприклад exchange.example.com)}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - app
+
+volumes:
+  caddy_data:
+  caddy_config:

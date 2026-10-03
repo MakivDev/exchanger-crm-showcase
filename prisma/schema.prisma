@@ -1,0 +1,510 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum TransactionType {
+  buy
+  sell
+  lend
+  repay
+  recolor
+  expense
+  adjustment
+  exchange
+  cash_in
+  cash_out
+  balance_transfer
+}
+
+enum DebtDirection {
+  they_owe_us
+  we_owe_them
+}
+
+enum OperationStatus {
+  draft
+  posted
+  cancelled
+}
+
+enum JournalLineSide {
+  out
+  /// Received into wallet (Prisma/TS cannot use bare `in`)
+  inn @map("in")
+}
+
+model User {
+  id           String   @id @default(cuid())
+  login        String   @unique
+  passwordHash String
+  name         String
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  sessions          Session[]
+  permissions       UserPermission[]
+  operationsCreated Operation[]      @relation("OperationCreatedBy")
+  operationsUpdated Operation[]      @relation("OperationUpdatedBy")
+  operationsArchived Operation[]     @relation("OperationArchivedBy")
+  auditLogs         AuditLog[]
+  notifications     Notification[]
+  balanceAdjustments BalanceAdjustment[]
+  journalPositions   JournalPosition[]
+  daySummariesClosed DaySummary[]        @relation("DaySummaryClosedBy")
+
+  @@map("users")
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  userId    String
+  tokenHash String   @unique
+  createdAt DateTime @default(now())
+  lastSeenAt DateTime @default(now())
+  userAgent String?
+  ip        String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("sessions")
+}
+
+model Permission {
+  id          String @id @default(cuid())
+  code        String @unique
+  label       String
+  description String?
+
+  users UserPermission[]
+
+  @@map("permissions")
+}
+
+model UserPermission {
+  userId       String
+  permissionId String
+  grantedAt    DateTime @default(now())
+
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([userId, permissionId])
+  @@map("user_permissions")
+}
+
+model PermissionPreset {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  description String?
+  codes       String[]
+  createdAt   DateTime @default(now())
+
+  @@map("permission_presets")
+}
+
+model AppSetting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+
+  @@map("app_settings")
+}
+
+model Branch {
+  id        String   @id @default(cuid())
+  name      String
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  wallets      Wallet[]
+  dayOpenings  DayOpening[]
+  operations   Operation[]
+  journalPositions JournalPosition[]
+  dayRates     DayRate[]
+  daySummaries DaySummary[]
+
+  @@map("branches")
+}
+
+model Currency {
+  id     String  @id @default(cuid())
+  code   String  @unique
+  name   String
+  isActive Boolean @default(true)
+
+  wallets  Wallet[]
+  dayRates DayRate[]
+
+  @@map("currencies")
+}
+
+model Wallet {
+  id         String   @id @default(cuid())
+  branchId   String
+  currencyId String
+  name       String
+  color      String
+  balance    Decimal  @default(0) @db.Decimal(18, 4)
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  branch             Branch              @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  currency           Currency            @relation(fields: [currencyId], references: [id], onDelete: Restrict)
+  legs               OperationLeg[]
+  debts              Debt[]
+  dayOpenings        DayOpening[]
+  balanceAdjustments BalanceAdjustment[]
+  attachments        Attachment[]
+  journalLines       JournalLine[]
+  lastRate           WalletLastRate?
+
+  @@unique([branchId, name])
+  @@index([branchId])
+  @@map("wallets")
+}
+
+/// Last known units-per-USD rates for a wallet (buy ≠ sell; for approx USD & suggestions).
+model WalletLastRate {
+  walletId String @id
+  /// Fallback / last-touched rate (≈USD display). Units of currency per 1 USD.
+  unitsPerUsd Decimal @db.Decimal(18, 8)
+  /// Курс купівлі: коли валюта заходить у касу (Отримали / buy).
+  buyUnitsPerUsd Decimal? @db.Decimal(18, 8)
+  /// Курс продажу: коли валюта йде з каси (Віддали / sell).
+  sellUnitsPerUsd Decimal? @db.Decimal(18, 8)
+  updatedAt DateTime @updatedAt
+  /// Optional note: journal | operation | repay | seed
+  source String?
+
+  wallet Wallet @relation(fields: [walletId], references: [id], onDelete: Cascade)
+
+  @@map("wallet_last_rates")
+}
+
+model ExpenseCategory {
+  id       String  @id @default(cuid())
+  name     String  @unique
+  isActive Boolean @default(true)
+
+  operations Operation[]
+
+  @@map("expense_categories")
+}
+
+model Counterparty {
+  id        String   @id @default(cuid())
+  name      String
+  phone     String?
+  telegram  String?
+  note      String?
+  temporary Boolean  @default(false)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  operations Operation[]
+  debts      Debt[]
+  journalPositions JournalPosition[]
+
+  @@index([name])
+  @@map("counterparties")
+}
+
+model Operation {
+  id                String          @id @default(cuid())
+  branchId          String
+  type              TransactionType
+  status            OperationStatus @default(posted)
+  counterpartyId    String?
+  counterpartyText  String?
+  expenseCategoryId String?
+  operationDate     DateTime        @db.Date
+  /// Units of wallet currency per 1 USD (e.g. 41.50 UAH/USD). USD wallet = 1.
+  rate              Decimal?        @db.Decimal(18, 8)
+  /// Snapshot: abs(primary amount) / rate
+  usdAmount         Decimal?        @db.Decimal(18, 4)
+  profit            Decimal?        @db.Decimal(18, 4)
+  note              String?
+  archived          Boolean         @default(false)
+  archivedAt        DateTime?
+  archivedById      String?
+  archiveComment    String?
+  createdById       String
+  updatedById       String?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+
+  branch          Branch           @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  counterparty    Counterparty?    @relation(fields: [counterpartyId], references: [id], onDelete: SetNull)
+  expenseCategory ExpenseCategory? @relation(fields: [expenseCategoryId], references: [id], onDelete: SetNull)
+  createdBy       User             @relation("OperationCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  updatedBy       User?            @relation("OperationUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+  archivedBy      User?            @relation("OperationArchivedBy", fields: [archivedById], references: [id], onDelete: SetNull)
+  legs            OperationLeg[]
+  attachments     Attachment[]
+  journalPosition JournalPosition?
+
+  @@index([branchId, operationDate])
+  @@index([type])
+  @@index([archived])
+  @@map("operations")
+}
+
+model OperationLeg {
+  id          String           @id @default(cuid())
+  operationId String
+  walletId    String
+  amount      Decimal          @db.Decimal(18, 4)
+  side        JournalLineSide?
+  /// Frozen units-per-USD rate used for this leg (immutable snapshot)
+  rateUsd     Decimal?         @db.Decimal(18, 8)
+  /// Frozen USD notional at rateUsd
+  usdAmount   Decimal?         @db.Decimal(18, 4)
+
+  operation Operation @relation(fields: [operationId], references: [id], onDelete: Cascade)
+  wallet    Wallet    @relation(fields: [walletId], references: [id], onDelete: Restrict)
+
+  @@index([operationId])
+  @@index([walletId])
+  @@map("operation_legs")
+}
+
+model JournalPosition {
+  id              String    @id @default(cuid())
+  branchId        String
+  operationDate   DateTime  @db.Date
+  counterpartyId  String?
+  counterpartyText String?
+  sortOrder       Int       @default(0)
+  note            String?
+  /// Manual P/L override in USD (after warning confirm)
+  profitOverride  Decimal?  @db.Decimal(18, 4)
+  profitWarnedAt  DateTime?
+  /// Synced posted operation (multi-leg)
+  operationId     String?   @unique
+  createdById     String
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  branch       Branch           @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  counterparty Counterparty?    @relation(fields: [counterpartyId], references: [id], onDelete: SetNull)
+  operation    Operation?       @relation(fields: [operationId], references: [id], onDelete: SetNull)
+  createdBy    User             @relation(fields: [createdById], references: [id], onDelete: Restrict)
+  lines        JournalLine[]
+  crossRates   JournalCrossRate[]
+
+  @@index([branchId, operationDate])
+  @@map("journal_positions")
+}
+
+model JournalLine {
+  id         String          @id @default(cuid())
+  positionId String
+  walletId   String
+  side       JournalLineSide
+  amount     Decimal         @db.Decimal(18, 4)
+  /// Frozen units of wallet currency per 1 USD at save time
+  rateUsd    Decimal?        @db.Decimal(18, 8)
+  /// Frozen USD notional at rateUsd
+  usdAmount  Decimal?        @db.Decimal(18, 4)
+  sortOrder  Int             @default(0)
+
+  position JournalPosition @relation(fields: [positionId], references: [id], onDelete: Cascade)
+  wallet   Wallet          @relation(fields: [walletId], references: [id], onDelete: Restrict)
+
+  crossFrom JournalCrossRate[] @relation("CrossFrom")
+  crossTo   JournalCrossRate[] @relation("CrossTo")
+
+  @@index([positionId])
+  @@index([walletId])
+  @@map("journal_lines")
+}
+
+model JournalCrossRate {
+  id         String  @id @default(cuid())
+  positionId String
+  fromLineId String
+  toLineId   String
+  /// Units of `to` currency per 1 unit of `from`
+  rate       Decimal @db.Decimal(18, 8)
+
+  position JournalPosition @relation(fields: [positionId], references: [id], onDelete: Cascade)
+  fromLine JournalLine     @relation("CrossFrom", fields: [fromLineId], references: [id], onDelete: Cascade)
+  toLine   JournalLine     @relation("CrossTo", fields: [toLineId], references: [id], onDelete: Cascade)
+
+  @@unique([fromLineId, toLineId])
+  @@index([positionId])
+  @@map("journal_cross_rates")
+}
+
+model Debt {
+  id             String        @id @default(cuid())
+  counterpartyId String
+  walletId       String
+  direction      DebtDirection
+  amount         Decimal       @db.Decimal(18, 4)
+  remaining      Decimal       @db.Decimal(18, 4)
+  note           String?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  counterparty Counterparty @relation(fields: [counterpartyId], references: [id], onDelete: Restrict)
+  wallet       Wallet       @relation(fields: [walletId], references: [id], onDelete: Restrict)
+  repayments   DebtRepayment[]
+
+  @@index([counterpartyId])
+  @@index([direction])
+  @@map("debts")
+}
+
+model DebtRepayment {
+  id        String   @id @default(cuid())
+  debtId    String
+  amount    Decimal  @db.Decimal(18, 4)
+  rate      Decimal? @db.Decimal(18, 8)
+  note      String?
+  createdAt DateTime @default(now())
+
+  debt Debt @relation(fields: [debtId], references: [id], onDelete: Cascade)
+
+  @@index([debtId])
+  @@map("debt_repayments")
+}
+
+model DayOpening {
+  id        String   @id @default(cuid())
+  branchId  String
+  walletId  String
+  date      DateTime @db.Date
+  amount    Decimal  @db.Decimal(18, 4)
+  createdAt DateTime @default(now())
+
+  branch Branch @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  wallet Wallet @relation(fields: [walletId], references: [id], onDelete: Cascade)
+
+  @@unique([walletId, date])
+  @@index([branchId, date])
+  @@map("day_openings")
+}
+
+/// Units of currency per 1 USD for day inventory reconciliation (same convention as Operation.rate).
+model DayRate {
+  id         String   @id @default(cuid())
+  branchId   String
+  date       DateTime @db.Date
+  currencyId String
+  /// Units of this currency per 1 USD (USD = 1)
+  unitsPerUsd Decimal @db.Decimal(18, 8)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  branch   Branch   @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  currency Currency @relation(fields: [currencyId], references: [id], onDelete: Restrict)
+
+  @@unique([branchId, date, currencyId])
+  @@index([branchId, date])
+  @@map("day_rates")
+}
+
+/// Day close: profitUsd = actualClosingUsd − theoreticalClosingUsd
+model DaySummary {
+  id                     String    @id @default(cuid())
+  branchId               String
+  date                   DateTime  @db.Date
+  openingUsd             Decimal   @db.Decimal(18, 4)
+  theoreticalClosingUsd  Decimal   @db.Decimal(18, 4)
+  actualClosingUsd       Decimal   @db.Decimal(18, 4)
+  /// actual − theoretical (дохід / розбіжність дня)
+  profitUsd              Decimal   @db.Decimal(18, 4)
+  movementsUsd           Decimal   @db.Decimal(18, 4)
+  /// Frozen rates used at close: { [currencyCode]: unitsPerUsd }
+  ratesSnapshot          Json?
+  /// Frozen wallet balances at close: { [walletId]: amount }
+  balancesSnapshot       Json?
+  closedAt               DateTime?
+  closedById             String?
+  note                   String?
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+
+  branch   Branch @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  closedBy User?  @relation("DaySummaryClosedBy", fields: [closedById], references: [id], onDelete: SetNull)
+
+  @@unique([branchId, date])
+  @@index([branchId, date])
+  @@map("day_summaries")
+}
+
+model BalanceAdjustment {
+  id        String   @id @default(cuid())
+  walletId  String
+  userId    String
+  delta     Decimal  @db.Decimal(18, 4)
+  balanceAfter Decimal @db.Decimal(18, 4)
+  comment   String
+  createdAt DateTime @default(now())
+
+  wallet Wallet @relation(fields: [walletId], references: [id], onDelete: Restrict)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@index([walletId])
+  @@map("balance_adjustments")
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  title     String
+  body      String
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, read])
+  @@map("notifications")
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String?
+  actorName String
+  action    String
+  entity    String?
+  entityId  String?
+  comment   String?
+  meta      Json?
+  createdAt DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt])
+  @@index([entity, entityId])
+  @@map("audit_logs")
+}
+
+model Attachment {
+  id          String   @id @default(cuid())
+  operationId String?
+  walletId    String?
+  fileName    String
+  mimeType    String
+  sizeBytes   Int
+  storagePath String
+  createdAt   DateTime @default(now())
+
+  operation Operation? @relation(fields: [operationId], references: [id], onDelete: Cascade)
+  wallet    Wallet?    @relation(fields: [walletId], references: [id], onDelete: SetNull)
+
+  @@index([operationId])
+  @@map("attachments")
+}

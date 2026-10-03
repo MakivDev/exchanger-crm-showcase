@@ -1,0 +1,72 @@
+"use client";
+
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import type { Permission } from "@/lib/types/domain";
+import { canSeeNav } from "@/lib/auth/access";
+
+const tabs: {
+  href: string;
+  label: string;
+  anyOf?: Permission[];
+}[] = [
+  {
+    href: "/work/dashboard",
+    label: "Дашборд",
+    anyOf: ["view_operations", "create_operation"],
+  },
+  {
+    href: "/work/journal",
+    label: "Журнал",
+    anyOf: ["view_operations", "create_operation"],
+  },
+  {
+    href: "/work/day-summary",
+    label: "Підсумок дня",
+    anyOf: ["view_operations", "create_operation"],
+  },
+  {
+    href: "/work/balances",
+    label: "Залишки",
+    anyOf: ["view_operations", "create_operation"],
+  },
+  {
+    href: "/work/debts",
+    label: "Борги",
+    anyOf: ["view_operations", "create_operation"],
+  },
+  {
+    href: "/work/expenses",
+    label: "Витрати",
+    anyOf: ["view_operations", "create_operation"],
+  },
+];
+
+export function WorkTopbar({ permissions }: { permissions: string[] }) {
+  const pathname = usePathname();
+  const visible = tabs.filter((t) => canSeeNav({ permissions }, t.anyOf));
+
+  return (
+    <div className="border-b border-border bg-surface">
+      <div className="flex gap-1 overflow-x-auto px-3 py-2 sm:px-5">
+        {visible.map((tab) => {
+          const active =
+            pathname === tab.href || pathname.startsWith(`${tab.href}/`);
+          return (
+            <Link
+              key={tab.href}
+              href={tab.href}
+              className={`shrink-0 rounded-[var(--radius)] px-3 py-1.5 text-[13px] transition ${
+                active
+                  ? "bg-accent text-accent-fg"
+                  : "text-text-muted hover:bg-surface-2 hover:text-text"
+              }`}
+            >
+              {tab.label}
+            </Link>
+          );
+        })}
+      </div>
+    </div>
+  );
+}

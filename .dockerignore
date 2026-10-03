@@ -1,0 +1,17 @@
+node_modules
+.next
+.git
+.agents
+.cursor
+design
+.env
+.env.*
+!.env.example
+*.md
+!README.md
+coverage
+.vercel
+*.log
+.DS_Store
+Thumbs.db
+scripts/reset-demo-db.ts
